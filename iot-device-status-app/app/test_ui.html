@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>功能测试平台</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            padding: 0;
+            background-color: #f4f4f4;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            background-color: #f2f2f2;
+        }
+
+        .status {
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+
+        .status-pending {
+            background-color: #ffd700;
+            color: #333;
+        }
+
+        .status-success {
+            background-color: #90ee90;
+            color: #333;
+        }
+
+        .status-failure {
+            background-color: #ffcccb;
+            color: #333;
+        }
+
+        button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #ddd;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 3px solid #ccc;
+            border-top: 3px solid #333;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 8px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        #connection-status {
+            margin-top: 20px;
+            text-align: right;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>功能测试平台</h1>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>测试功能</th>
+                    <th>测试状态</th>
+                    <th>操作</th>
+                    <th>测试结果</th>
+                </tr>
+            </thead>
+            <tbody id="test-table-body">
+                <!-- 测试条目将通过JavaScript动态添加 -->
+            </tbody>
+        </table>
+        
+        <div id="connection-status">连接状态: 正在连接...</div>
+    </div>
+
+    <script>
+        // 获取DOM元素
+        const testTableBody = document.getElementById('test-table-body');
+        
+        // 默认测试功能列表
+        const defaultTestFunctions = [
+            "test_function_1"
+        ];
+        
+        // 页面加载时初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            // 加载默认测试功能列表
+            handleFunctionList(defaultTestFunctions);
+        });
+        
+        // 处理函数列表
+        function handleFunctionList(functions) {
+            testTableBody.innerHTML = '';
+            
+            functions.forEach((funcName, index) => {
+                const row = document.createElement('tr');
+                row.id = `row-${funcName}`;
+                
+                row.innerHTML = `
+                    <td>${index + 1}</td>
+                    <td>${formatFunctionName(funcName)}</td>
+                    <td>
+                        <span class="status status-pending" id="status-${funcName}">待测试</span>
+                    </td>
+                    <td>
+                        <button onclick="runTest('${funcName}')" id="btn-${funcName}">
+                            点击测试
+                            <span class="loading" id="loading-${funcName}" style="display: none;"></span>
+                        </button>
+                    </td>
+                    <td id="result-${funcName}">未执行</td>
+                `;
+                
+                testTableBody.appendChild(row);
+                testTasks[funcName] = { status: 'pending' };
+            });
+        }
+        
+        // 格式化函数名称（移除下划线并转换为中文）
+        function formatFunctionName(name) {
+            return name
+                .replace(/_/g, ' ')
+                .replace(/\b\w/g, c => c.toUpperCase())
+                .replace(/^test /i, '');
+        }
+        
+        // 触发测试
+        window.runTest = function(functionName) {
+            const button = document.getElementById(`btn-${functionName}`);
+            const loading = document.getElementById(`loading-${functionName}`);
+            
+            // 禁用按钮并显示加载动画
+            button.disabled = true;
+            loading.style.display = 'inline-block';
+            
+            // 更新状态为测试中
+            updateStatus(functionName, 'testing', '测试中...');
+            
+            // 发送测试请求
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ 
+                    type: 'run_test', 
+                    functionName: functionName 
+                }));
+            } else {
+                showError(functionName, 'WebSocket连接不可用');
+                button.disabled = false;
+                loading.style.display = 'none';
+            }
+        };
+        
+        // 处理测试开始事件
+        function handleTestStart(functionName) {
+            updateStatus(functionName, 'testing', '测试中...');
+            
+            // 找到对应的按钮并禁用
+            const button = document.getElementById(`btn-${functionName}`);
+            if (button) {
+                button.disabled = true;
+            }
+        }
+        
+        // 处理测试结果事件
+        function handleTestResult(functionName, result) {
+            if (result.result === 'success') {
+                // 测试成功，更新状态为"已完成"
+                updateStatus(functionName, 'success', '测试通过');
+                
+                // 显示详细结果
+                showResult(functionName, result);
+            } else {
+                // 测试失败或发生错误，重置状态为"待测试"
+                updateStatus(functionName, 'pending', '待测试');
+                
+                // 显示错误信息
+                showError(functionName, result.error || '测试失败');
+            }
+            
+            // 启用按钮
+            const button = document.getElementById(`btn-${functionName}`);
+            const loading = document.getElementById(`loading-${functionName}`);
+            if (button) {
+                button.disabled = false;
+            }
+            if (loading) {
+                loading.style.display = 'none';
+            }
+        }
+        
+        // 显示错误
+        function showError(functionName, errorMessage) {
+            updateStatus(functionName, 'failure', '发生错误');
+            
+            const resultCell = document.getElementById(`result-${functionName}`);
+            if (resultCell) {
+                resultCell.innerHTML = `<span style="color: red;">${errorMessage}</span>`;
+            }
+        }
+        
+        // 更新状态标签
+        function updateStatus(functionName, statusType, text) {
+            const statusSpan = document.getElementById(`status-${functionName}`);
+            if (!statusSpan) return;
+            
+            // 移除现有状态类
+            statusSpan.className = 'status';
+            
+            // 添加新的状态类
+            switch(statusType) {
+                case 'pending':
+                    statusSpan.classList.add('status-pending');
+                    break;
+                case 'testing':
+                    statusSpan.classList.add('status-pending');
+                    break;
+                case 'success':
+                    statusSpan.classList.add('status-success');
+                    break;
+                case 'failure':
+                    statusSpan.classList.add('status-failure');
+                    break;
+            }
+            
+            statusSpan.textContent = text;
+        }
+        
+        // 显示测试结果
+        function showResult(functionName, result) {
+            const resultCell = document.getElementById(`result-${functionName}`);
+            if (!resultCell) return;
+            
+            if (result.error) {
+                resultCell.innerHTML = `
+                    <div style="color: red;">
+                        错误: ${result.error}
+                    </div>
+                `;
+            } else {
+                resultCell.innerHTML = `
+                    <div>
+                        结果: ${result.result}<br>
+                        耗时: ${result.duration}<br>
+                        详情: ${result.details}
+                    </div>
+                `;
+            }
+        }
+        
+        // 触发测试
+        window.runTest = function(functionName) {
+            const button = document.getElementById(`btn-${functionName}`);
+            const loading = document.getElementById(`loading-${functionName}`);
+            
+            // 禁用按钮并显示加载动画
+            button.disabled = true;
+            loading.style.display = 'inline-block';
+            
+            // 更新状态为测试中
+            updateStatus(functionName, 'testing', '测试中...');
+            
+            // 使用GET请求发送测试指令
+            fetch(`/run-test?function_name=${encodeURIComponent(functionName)}`, {
+                method: 'GET'
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('网络响应失败');
+                }
+                return response.json();
+            })
+            .then(result => {
+                console.log("测试结果:", result);
+                
+                // 处理测试结果
+                if (result.status === 'success') {
+                    updateStatus(functionName, 'success', '测试通过');
+                } else if (result.status === 'failure') {
+                    updateStatus(functionName, 'failure', '测试失败');
+                } else {
+                    updateStatus(functionName, 'failure', '发生错误');
+                }
+                
+                // 显示详细结果
+                if (result.error) {
+                    showError(functionName, result.error);
+                } else {
+                    showResult(functionName, result);
+                }
+                
+                // 启用按钮
+                button.disabled = false;
+                loading.style.display = 'none';
+            })
+            .catch(error => {
+                console.error("测试执行错误:", error);
+                showError(functionName, '测试执行失败');
+                button.disabled = false;
+                loading.style.display = 'none';
+            });
+        };
+        
+        // 处理测试开始事件
+        function handleTestStart(functionName) {
+            updateStatus(functionName, 'testing', '测试中...');
+            
+            // 找到对应的按钮并禁用
+            const button = document.getElementById(`btn-${functionName}`);
+            if (button) {
+                button.disabled = true;
+            }
+        }
+        
+        // 处理测试结果事件
+        function handleTestResult(functionName, result) {
+            if (result.status === 'success') {
+                updateStatus(functionName, 'success', '测试通过');
+            } else if (result.status === 'failure') {
+                updateStatus(functionName, 'failure', '测试失败');
+            } else {
+                updateStatus(functionName, 'failure', '发生错误');
+            }
+            
+            // 显示详细结果
+            showResult(functionName, result);
+            
+            // 启用按钮
+            const button = document.getElementById(`btn-${functionName}`);
+            const loading = document.getElementById(`loading-${functionName}`);
+            if (button) {
+                button.disabled = false;
+            }
+            if (loading) {
+                loading.style.display = 'none';
+            }
+        }
+        
+        // 页面加载时初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            // 加载默认测试功能列表
+            handleFunctionList(defaultTestFunctions);
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "name": "iot-device-status-app",
+  "version": "1.0.0",
+  "description": "IoT Device Status Application",
+  "main": "index.js",
+  "scripts": {
+    "start": "webpack-dev-server --mode development --open",
+    "build": "webpack --mode production",
+    "server": "python server/app.py",
+    "dev": "concurrently \"npm start\" \"npm run server\""
+  },
+  "dependencies": {
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2"
+  },
+  "devDependencies": {
+    "webpack": "^5.72.0",
+    "webpack-cli": "^4.9.2",
+    "webpack-dev-server": "^4.9.3",
+    "concurrently": "^6.2.0"
+  }
+}

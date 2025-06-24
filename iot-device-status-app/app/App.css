@@ -1,0 +1,112 @@
+/* App.css */
+
+.container {
+  font-family: Arial, sans-serif;
+  padding: 20px;
+}
+
+.title {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.refresh-button {
+  padding: 10px 20px;
+  font-size: 16px;
+  margin-bottom: 20px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.refresh-button:hover {
+  background-color: #0056b3;
+}
+
+.device-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.device-card {
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  padding: 15px;
+  width: 250px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s;
+  cursor: pointer;
+  background-color: #f9f9f9;
+}
+
+.device-card:hover {
+  transform: scale(1.02);
+}
+
+.status-online {
+  color: green;
+  font-weight: bold;
+}
+
+.status-offline {
+  color: red;
+  font-weight: bold;
+}
+
+h3 {
+  margin-top: 0;
+}
+
+p {
+  margin: 8px 0;
+}
+
+/* Device Detail Styles */
+.device-detail {
+  max-width: 500px;
+  margin: 40px auto;
+  padding: 20px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background-color: #ffffff;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.device-detail h2 {
+  margin-top: 0;
+  color: #333;
+}
+
+.device-detail p {
+  font-size: 16px;
+  color: #555;
+}
+
+.back-button {
+  display: inline-block;
+  margin-top: 20px;
+  padding: 10px 20px;
+  background-color: #6c757d;
+  color: white;
+  text-decoration: none;
+  border-radius: 4px;
+  transition: background-color 0.3s ease;
+}
+
+.back-button:hover {
+  background-color: #5a6268;
+}
+
+/* Link Styles for Device Cards */
+.link-style {
+  text-decoration: none;
+  color: inherit;
+}
+
+.link-style:hover {
+  opacity: 0.8;
+}
