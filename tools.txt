@@ -1,0 +1,39 @@
+
+
+示例
+'''
+sudo docker-compose up -d
+WARNING: The PROXY_SERVER variable is not set. Defaulting to a blank string.
+WARNING: The PROXY_USERNAME variable is not set. Defaulting to a blank string.
+WARNING: The PROXY_PASSWORD variable is not set. Defaulting to a blank string.
+WARNING: The BLOCK_MEDIA variable is not set. Defaulting to a blank string.
+WARNING: The USE_DB_AUTHENTICATION variable is not set. Defaulting to a blank string.
+WARNING: The OPENAI_API_KEY variable is not set. Defaulting to a blank string.
+WARNING: The OPENAI_BASE_URL variable is not set. Defaulting to a blank string.
+WARNING: The MODEL_NAME variable is not set. Defaulting to a blank string.
+WARNING: The MODEL_EMBEDDING_NAME variable is not set. Defaulting to a blank string.
+WARNING: The OLLAMA_BASE_URL variable is not set. Defaulting to a blank string.
+WARNING: The SLACK_WEBHOOK_URL variable is not set. Defaulting to a blank string.
+WARNING: The BULL_AUTH_KEY variable is not set. Defaulting to a blank string.
+WARNING: The TEST_API_KEY variable is not set. Defaulting to a blank string.
+WARNING: The POSTHOG_API_KEY variable is not set. Defaulting to a blank string.
+WARNING: The POSTHOG_HOST variable is not set. Defaulting to a blank string.
+WARNING: The SUPABASE_ANON_TOKEN variable is not set. Defaulting to a blank string.
+WARNING: The SUPABASE_URL variable is not set. Defaulting to a blank string.
+WARNING: The SUPABASE_SERVICE_TOKEN variable is not set. Defaulting to a blank string.
+WARNING: The SELF_HOSTED_WEBHOOK_URL variable is not set. Defaulting to a blank string.
+WARNING: The SERPER_API_KEY variable is not set. Defaulting to a blank string.
+WARNING: The SEARCHAPI_API_KEY variable is not set. Defaulting to a blank string.
+WARNING: The LOGGING_LEVEL variable is not set. Defaulting to a blank string.
+WARNING: The SEARXNG_ENDPOINT variable is not set. Defaulting to a blank string.
+WARNING: The SEARXNG_ENGINES variable is not set. Defaulting to a blank string.
+WARNING: The SEARXNG_CATEGORIES variable is not set. Defaulting to a blank string.
+ERROR: The Compose file './docker-compose.yaml' is invalid because:
+'name' does not match any of the regexes: '^x-'
+
+You might be seeing this error because you're using the wrong Compose file version. Either specify a supported version (e.g "2.2" or "3.3") and place your service definitions under the services key, or omit the version key and place your service definitions at the root of the file to use version 1.
+For more on the Compose file format versions, see https://docs.docker.com/compose/compose-file/
+'''
+# 升级docker-compose
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
