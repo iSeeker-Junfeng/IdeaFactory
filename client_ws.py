@@ -498,8 +498,8 @@ async def main():
     """主函数"""
     # 创建客户端
     client = XiaozhiClient(
-        ws_url="wss://2662r3426b.vicp.fun/xiaozhi/v1/",
-        ota_url="https://2662r3426b.vicp.fun/xiaozhi/ota/",
+        ws_url="wss://127.0.0.1/xiaozhi/v1/",
+        ota_url="https://127.0.0.1/xiaozhi/ota/",
         device_mac="AA:BB:CC:DD:EE:FF",  # 可以修改为你的设备MAC
         client_id="python_test_client",
         token="your-token1"
