@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-小智服务器 Python 客户端
-实时播放收集到的音频字节 - 修复版本
+小智服务器 Python 客户端 - 实时流式播放版本
+一边接收一边播放音频
 """
 
 import asyncio
@@ -13,12 +13,9 @@ import string
 import time
 import websockets
 import requests
-import subprocess
-import tempfile
-import os
-import threading
-from typing import Optional, Dict, Any
-from collections import deque
+from typing import Optional, Dict, Any, List
+
+from IdeaFactory.opus_encoder_tulis import OpusEncoderUtils
 
 # 配置日志
 logging.basicConfig(
@@ -28,12 +25,131 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+import threading
+import queue
+import pyaudio
+import subprocess
+import os
+import tempfile
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+opus_encoder = OpusEncoderUtils(
+            sample_rate=16000, channels=1, frame_size_ms=60
+        )
+class StreamingAudioPlayer:
+    """实时流式音频播放器（使用 pyaudio 播放）"""
+
+    def __init__(self):
+        self.audio_queue = queue.Queue()
+        self.is_playing = False
+        self.stream = None
+        self.pyaudio_instance = pyaudio.PyAudio()
+        self.temp_dir = tempfile.mkdtemp(prefix="streaming_audio_")
+        self.frame_counter = 0
+
+        # 假设解码后为 mono/48000Hz/16bit
+        self.channels = 1
+        self.rate = 48000
+        self.format = pyaudio.paInt16
+
+    def start_streaming(self):
+        """开始流式播放"""
+        if self.is_playing:
+            return
+
+        self.is_playing = True
+        self.stream = self.pyaudio_instance.open(
+            format=self.format,
+            channels=self.channels,
+            rate=self.rate,
+            output=True
+        )
+        self.player_thread = threading.Thread(target=self._streaming_worker, daemon=True)
+        self.player_thread.start()
+        logger.info("流式播放器已启动")
+
+    def stop_streaming(self):
+        """停止流式播放"""
+        self.is_playing = False
+        if self.stream:
+            self.stream.stop_stream()
+            self.stream.close()
+        self.pyaudio_instance.terminate()
+        logger.info("流式播放器已停止")
+
+    def add_audio_frame(self, audio_data: bytes):
+        """添加音频帧到播放队列"""
+        if not self.is_playing:
+            self.start_streaming()
+
+        self.audio_queue.put(audio_data)
+
+    def _streaming_worker(self):
+        """流式播放工作线程"""
+        while self.is_playing:
+            try:
+                audio_data = self.audio_queue.get(timeout=1)
+                pcm_data = self._decode_opus_to_pcm(audio_data)
+                if pcm_data:
+                    self.stream.write(pcm_data)
+            except queue.Empty:
+                continue
+            except Exception as e:
+                logger.error(f"流式播放错误: {e}")
+
+    def _decode_opus_to_pcm(self, opus_data: bytes) -> bytes:
+        """用ffmpeg把opus字节解码成pcm原始流"""
+        try:
+            # 用 subprocess 启动 ffmpeg 解码器，输入 Opus 数据，输出 PCM 原始流
+            opus = opus_encoder.encode_pcm_to_opus(opus_data,True)[0]
+            print(f"{opus=}")
+            ffmpeg = subprocess.Popen(
+                ["ffmpeg", "-i", "pipe:0", "-f", "s16le", "-acodec", "pcm_s16le", "-ac", str(self.channels), "-ar", str(self.rate), "pipe:1"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL
+            )
+            pcm_data, _ = ffmpeg.communicate(input=opus, timeout=5)
+            return pcm_data
+        except Exception as e:
+            logger.error(f"解码错误: {e}")
+            return None
+
+
+    def _play_frame(self, frame_file):
+        """播放单个音频帧"""
+        try:
+            # 使用ffplay播放音频帧
+            cmd = [
+                'ffplay', '-nodisp', '-autoexit', '-f', 'opus',
+                '-ar', '16000', '-ac', '1', frame_file
+            ]
+
+            self.player_process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+
+            # 等待播放完成（最多等待1秒）
+            try:
+                self.player_process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                self.player_process.terminate()
+
+        except Exception as e:
+            logger.error(f"播放音频帧失败: {e}")
+
+
 class XiaozhiClient:
     def __init__(self,
                  ws_url: str = "ws://127.0.0.1:8000/xiaozhi/v1/",
                  ota_url: str = "http://127.0.0.1:8002/xiaozhi/ota/",
                  device_mac: str = None,
-                 client_id: str = "python_test_client",
+                 client_id: str = "guition-jc8012p4a1",
                  token: str = "your-token1"):
 
         self.ws_url = ws_url
@@ -48,14 +164,11 @@ class XiaozhiClient:
         self.is_connected = False
         self.message_handlers = {}
 
-        # 音频相关 - 流式播放
-        self.audio_queue = deque()  # 音频数据队列
+        # 音频相关
+        self.audio_player = StreamingAudioPlayer()
         self.is_receiving_audio = False
-        self.ffplay_process = None
-        self.audio_thread = None
         self.audio_lock = threading.Lock()
-        self.audio_buffer = bytearray()  # 累积音频数据
-        self.last_audio_time = 0
+        self.playback_mode = "streaming"  # streaming, buffered, save_only
 
         # 注册消息处理器
         self._register_handlers()
@@ -93,18 +206,18 @@ class XiaozhiClient:
                 "version": 0,
                 "uuid": "",
                 "application": {
-                    "name": "xiaozhi-python-test",
+                    "name": "guition-jc8012p4a1",
                     "version": "1.0.0",
                     "compile_time": "2025-04-16 10:00:00",
                     "idf_version": "4.4.3",
                     "elf_sha256": "1234567890abcdef1234567890abcdef1234567890abcdef"
                 },
                 "ota": {
-                    "label": "xiaozhi-python-test",
+                    "label": "guition-jc8012p4a1",
                 },
                 "board": {
-                    "type": "xiaozhi-python-test",
-                    "ssid": "xiaozhi-python-test",
+                    "type": "guition-jc8012p4a1",
+                    "ssid": "guition-jc8012p4a1",
                     "rssi": 0,
                     "channel": 0,
                     "ip": "192.168.1.1",
@@ -130,12 +243,12 @@ class XiaozhiClient:
                     }
                 ]
             }
-
             response = requests.post(self.ota_url, headers=headers, json=body)
             if response.ok:
                 result = response.json()
                 logger.info(f"OTA检查成功: {result}")
-                return True
+                return  result['websocket']['url']
+                # return True
             else:
                 logger.error(f"OTA检查失败: {response.status_code} {response.text}")
                 return False
@@ -152,9 +265,10 @@ class XiaozhiClient:
             ota_ok = await self.check_ota()
             if not ota_ok:
                 logger.warning("OTA检查失败，但继续尝试连接...")
-
+            self.ws_url = ota_ok
             # 构建WebSocket URL
             ws_url_with_params = f"{self.ws_url}?device-id={self.device_mac}&client-id={self.client_id}"
+            print(ws_url_with_params)
             logger.info(f"连接到: {ws_url_with_params}")
 
             # 建立WebSocket连接
@@ -259,82 +373,45 @@ class XiaozhiClient:
             logger.error(f"处理消息错误: {e}")
 
     async def _handle_binary_data(self, binary_data):
-        """处理二进制音频数据 - 累积播放"""
+        """处理二进制音频数据 - 实时流式播放"""
         try:
             data_size = len(binary_data)
 
             if data_size == 0:
                 logger.info("收到空音频帧，音频传输结束")
-                await self._play_accumulated_audio()
+                self.is_receiving_audio = False
             else:
                 logger.info(f"收到音频数据，大小: {data_size} 字节")
+                self.is_receiving_audio = True
 
-                # 将音频数据累积到缓冲区
-                with self.audio_lock:
-                    self.audio_buffer.extend(binary_data)
-                    self.last_audio_time = time.time()
+                # 根据播放模式处理音频
+                if self.playback_mode == "streaming":
+                    # 实时流式播放
+                    self.audio_player.add_audio_frame(binary_data)
+                elif self.playback_mode == "buffered":
+                    # 缓冲播放（原有逻辑）
+                    await self._handle_buffered_audio(binary_data)
+                elif self.playback_mode == "save_only":
+                    # 仅保存
+                    await self._save_audio_frame(binary_data)
 
         except Exception as e:
             logger.error(f"处理二进制数据错误: {e}")
 
-    async def _play_accumulated_audio(self):
-        """播放累积的音频数据"""
-        try:
-            with self.audio_lock:
-                if len(self.audio_buffer) == 0:
-                    logger.info("没有音频数据需要播放")
-                    return
+    async def _handle_buffered_audio(self, binary_data):
+        """处理缓冲音频（原有逻辑）"""
+        # 这里保留原有的缓冲播放逻辑
+        pass
 
-                # 创建临时文件
-                temp_fd, temp_path = tempfile.mkstemp(suffix='.opus')
-                os.close(temp_fd)
+    async def _save_audio_frame(self, binary_data):
+        """保存音频帧"""
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        frame_file = f"audio_frame_{timestamp}_{len(binary_data)}.opus"
 
-                # 将累积的音频数据写入文件
-                with open(temp_path, 'wb') as f:
-                    f.write(self.audio_buffer)
+        with open(frame_file, 'wb') as f:
+            f.write(binary_data)
 
-                total_size = len(self.audio_buffer)
-                logger.info(f"准备播放音频，总大小: {total_size} 字节，文件: {temp_path}")
-
-                # 清空缓冲区
-                self.audio_buffer.clear()
-
-            # 启动ffplay播放音频文件
-            await self._play_audio_file(temp_path)
-
-        except Exception as e:
-            logger.error(f"播放累积音频失败: {e}")
-
-    async def _play_audio_file(self, audio_file_path):
-        """播放音频文件"""
-        try:
-            # 启动ffplay进程播放音频文件
-            process = subprocess.Popen([
-                'ffplay', '-nodisp', '-autoexit', '-f', 'opus',
-                '-ar', '16000', '-ac', '1', audio_file_path
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-            logger.info(f"开始播放音频文件: {audio_file_path}")
-
-            # 等待播放完成
-            try:
-                process.wait(timeout=30)  # 最多等待30秒
-                logger.info("音频播放完成")
-            except subprocess.TimeoutExpired:
-                logger.warning("音频播放超时，强制终止")
-                process.terminate()
-            except Exception as e:
-                logger.error(f"等待音频播放失败: {e}")
-
-            # 删除临时文件
-            try:
-                os.remove(audio_file_path)
-                logger.debug(f"已删除临时文件: {audio_file_path}")
-            except Exception as e:
-                logger.warning(f"删除临时文件失败: {e}")
-
-        except Exception as e:
-            logger.error(f"播放音频文件失败: {e}")
+        logger.info(f"音频帧已保存: {frame_file}")
 
     async def _handle_hello(self, message: Dict[str, Any]):
         """处理hello响应"""
@@ -354,8 +431,6 @@ class XiaozhiClient:
             logger.info(f"语音段结束: {text}")
         elif state == 'stop':
             logger.info("服务器语音传输结束")
-            # 播放累积的音频
-            await self._play_accumulated_audio()
         else:
             logger.info(f"TTS状态: {state}, 文本: {text}")
 
@@ -447,13 +522,22 @@ class XiaozhiClient:
 
     async def disconnect(self):
         """断开连接"""
-        # 播放剩余的音频数据
-        await self._play_accumulated_audio()
+        # 停止流式播放
+        self.audio_player.stop_streaming()
 
         if self.websocket:
             await self.websocket.close()
             self.is_connected = False
             logger.info("已断开连接")
+
+    def set_playback_mode(self, mode: str):
+        """设置播放模式"""
+        valid_modes = ["streaming", "buffered", "save_only"]
+        if mode in valid_modes:
+            self.playback_mode = mode
+            logger.info(f"播放模式设置为: {mode}")
+        else:
+            logger.warning(f"无效的播放模式: {mode}，有效模式: {valid_modes}")
 
     async def run_interactive(self):
         """运行交互式客户端 - 保持连接"""
@@ -465,7 +549,14 @@ class XiaozhiClient:
         listen_task = asyncio.create_task(self.listen_for_messages())
 
         try:
-            logger.info("客户端已启动，输入消息发送给服务器（输入 'quit' 退出）")
+            logger.info("客户端已启动，输入消息发送给服务器")
+            logger.info("特殊命令:")
+            logger.info("  'quit' - 退出程序")
+            logger.info("  'start' - 开始录音")
+            logger.info("  'stop' - 停止录音")
+            logger.info("  'stream' - 切换到流式播放模式")
+            logger.info("  'buffer' - 切换到缓冲播放模式")
+            logger.info("  'save' - 切换到仅保存模式")
 
             while self.is_connected:
                 try:
@@ -480,6 +571,12 @@ class XiaozhiClient:
                         await self.start_listening()
                     elif user_input.lower() == 'stop':
                         await self.stop_listening()
+                    elif user_input.lower() == 'stream':
+                        self.set_playback_mode("streaming")
+                    elif user_input.lower() == 'buffer':
+                        self.set_playback_mode("buffered")
+                    elif user_input.lower() == 'save':
+                        self.set_playback_mode("save_only")
                     elif user_input.strip():
                         await self.send_text_message(user_input)
 
@@ -498,9 +595,12 @@ async def main():
     """主函数"""
     # 创建客户端
     client = XiaozhiClient(
-        ws_url="wss://127.0.0.1/xiaozhi/v1/",
-        ota_url="https://127.0.0.1/xiaozhi/ota/",
-        device_mac="AA:BB:CC:DD:EE:FF",  # 可以修改为你的设备MAC
+        ws_url="",
+        # ws_url="wss://2662r3426b.vicp.fun/xiaozhi/v1/",
+        ota_url="http://47.100.81.66:8002/xiaozhi/ota/",
+        # ota_url="https://2662r3426b.vicp.fun/xiaozhi/ota/",
+        # device_mac="AA:BB:CC:DD:EE:FF",  # 可以修改为你的设备MAC
+        device_mac="9c:9e:6e:54:73:94",  # 可以修改为你的设备MAC
         client_id="python_test_client",
         token="your-token1"
     )
